@@ -93,4 +93,4 @@ jobs:
           context: ./dockerfiles/arduino
           platforms: linux/amd64, linux/aarch64
           push: true
-          tags: ghcr.io/${{ env.REPO_NAME }}/jenkinsci:arduino_agent_${{ env.BRANCH }}
+          tags: ghcr.io/${{ env.REPO_NAME }}/marlin:arduino_agent_${{ env.BRANCH }}
