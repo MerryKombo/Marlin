@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Free Disk Space (Ubuntu)
+        if: contains(env.files, 'Dockerfile') || contains(env.files, 'dockerfiles/')
         uses: jlumbroso/free-disk-space@main
         with:
           # this might remove tools that are actually needed,
