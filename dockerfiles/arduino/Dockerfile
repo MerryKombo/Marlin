@@ -1,7 +1,7 @@
 # This Dockerfile is used to create a Jenkins SSH agent with Arduino development environment.
 
 # Use jenkins/ssh-agent:5.38.0 as the base image
-FROM jenkins/ssh-agent:6.3.0 AS ssh-agent
+FROM jenkins/ssh-agent:6.8.0 AS ssh-agent
 
 # Install necessary packages including arduino-mk, build-essential, ca-certificates, curl, git, python3 and its related packages
 # This is to ensure that the necessary dependencies for Arduino development and Jenkins agent are installed.
