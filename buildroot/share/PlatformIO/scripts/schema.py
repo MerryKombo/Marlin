@@ -1,16 +1,34 @@
 #!/usr/bin/env python3
-#
-# schema.py
-#
-# Used by signature.py via common-dependencies.py to generate a schema file during the PlatformIO build
-# when CONFIG_EXPORT is defined in the configuration.
-#
-# This script can also be run standalone from within the Marlin repo to generate JSON and YAML schema files.
-#
-# This script is a companion to abm/js/schema.js in the MarlinFirmware/AutoBuildMarlin project, which has
-# been extended to evaluate conditions and can determine what options are actually enabled, not just which
-# options are uncommented. That will be migrated to this script for standalone migration.
-#
+"""
+schema.py
+
+Extract firmware configuration into structured JSON or YAML schema format.
+
+Used by signature.py via common-dependencies.py to generate a schema file during the
+PlatformIO build when CONFIG_EXPORT is defined in the configuration.
+
+This script can also be run standalone from within the Marlin repo, and is a companion to
+abm/js/schema.js in the MarlinFirmware/AutoBuildMarlin project, which has been extended to
+evaluate conditions and can determine what options are actually enabled, not just which
+options are uncommented. That will be migrated to this script for standalone migration.
+
+Usage: schema.py [-h] [some|json|jsons|group|yml|yaml]
+
+Process Marlin firmware configuration files (Configuration.h and Configuration_adv.h)
+to produce structured output suitable for documentation, tooling, or automated processing.
+
+Positional arguments:
+  some      Generate both JSON and YAML output (schema.json and schema.yml)
+  json      Generate JSON output (schema.json)
+  jsons     Generate grouped JSON output with wildcard options (schema.json and schema_grouped.json)
+  group     Generate grouped JSON output only (schema_grouped.json)
+  yml       Generate YAML output (schema.yml)
+  yaml      Same as 'yml'
+
+Optional arguments:
+  -h, --help  Show this help message and exit
+"""
+
 import re, json
 from pathlib import Path
 
@@ -70,7 +88,7 @@ def group_options(schema):
 def load_boards():
     bpath = Path("Marlin/src/core/boards.h")
     if bpath.is_file():
-        with bpath.open() as bfile:
+        with bpath.open(encoding='utf-8') as bfile:
             boards = []
             for line in bfile:
                 if line.startswith("#define BOARD_"):
@@ -126,7 +144,7 @@ def extract_files(filekey):
     sid = 0
     # Loop through files and parse them line by line
     for fn, fk in filekey.items():
-        with Path("Marlin", fn).open() as fileobj:
+        with Path("Marlin", fn).open(encoding='utf-8') as fileobj:
             section = 'none'        # Current Settings section
             line_number = 0         # Counter for the line number of the file
             conditions = []         # Create a condition stack for the current file
@@ -183,18 +201,28 @@ def extract_files(filekey):
                 # - The line starts with '======' so just skip it.
                 #
                 def use_comment(c, opt, sec, bufref):
-                    if c.startswith(':'):               # If the comment starts with : then it has magic JSON
-                        d = c[1:].strip()               # Strip the leading :
-                        cbr = c.rindex('}') if d.startswith('{') else c.rindex(']') if d.startswith('[') else 0
+                    '''
+                    c       - The comment line to parse
+                    opt     - Options JSON string to return (if not updated)
+                    sec     - Section to return (if not updated)
+                    bufref  - The comment buffer to add to
+                    '''
+                    sc = c.strip()                      # Strip for special patterns
+                    if sc.startswith(':'):              # If the comment starts with : then it has magic JSON
+                        d = sc[1:].strip()              # Strip the leading : and spaces
+                        # Look for a JSON container
+                        cbr = sc.rindex('}') if d.startswith('{') else sc.rindex(']') if d.startswith('[') else 0
                         if cbr:
-                            opt, cmt = c[1:cbr+1].strip(), c[cbr+1:].strip()
+                            opt, cmt = sc[1:cbr+1].strip(), sc[cbr+1:].strip()
                             if cmt != '': bufref.append(cmt)
                         else:
-                            opt = c[1:].strip()
-                    elif c.startswith('@section'):      # Start a new section
-                        sec = c[8:].strip()
-                    elif not c.startswith('========'):
-                        bufref.append(c)
+                            opt = sc[1:].strip()        # Some literal value not in a JSON container?
+                    else:
+                        m = re.match(r'@section\s*(.+)', sc) # Start a new section?
+                        if m:
+                            sec = m[1]
+                        elif not sc.startswith('========'):
+                            bufref.append(c)            # Anything else is part of the comment
                     return opt, sec
 
                 # For slash comments, capture consecutive slash comments.
@@ -225,7 +253,7 @@ def extract_files(filekey):
 
                     # Collect temperature sensors
                     if state == Parse.GET_SENSORS:
-                        sens = re.match(r'^(-?\d+)\s*:\s*(.+)$', cline)
+                        sens = re.match(r'^\s*(-?\d+)\s*:\s*(.+)$', cline)
                         if sens:
                             s2 = sens[2].replace("'", "''")
                             options_json += f"{sens[1]}:'{sens[1]} - {s2}', "
@@ -343,14 +371,14 @@ def extract_files(filekey):
                         # Type is based on the value
                         value_type = \
                              'switch'  if val == '' \
-                        else 'bool'    if re.match(r'^(true|false)$', val) \
                         else 'int'     if re.match(r'^[-+]?\s*\d+$', val) \
                         else 'ints'    if re.match(r'^([-+]?\s*\d+)(\s*,\s*[-+]?\s*\d+)+$', val) \
                         else 'floats'  if re.match(rf'({flt}(\s*,\s*{flt})+)', val) \
                         else 'float'   if re.match(f'^({flt})$', val) \
                         else 'string'  if val[0] == '"' \
                         else 'char'    if val[0] == "'" \
-                        else 'state'   if re.match(r'^(LOW|HIGH)$', val) \
+                        else 'bool'    if val in ('true', 'false') \
+                        else 'state'   if val in ('HIGH', 'LOW') \
                         else 'enum'    if re.match(r'^[A-Za-z0-9_]{3,}$', val) \
                         else 'int[]'   if re.match(r'^{\s*[-+]?\s*\d+(\s*,\s*[-+]?\s*\d+)*\s*}$', val) \
                         else 'float[]' if re.match(r'^{{\s*{flt}(\s*,\s*{flt})*\s*}}$', val) \
@@ -385,7 +413,7 @@ def extract_files(filekey):
                             units = re.match(r'^\(([^)]+)\)', full_comment)
                             if units:
                                 units = units[1]
-                                if units == 's' or units == 'sec': units = 'seconds'
+                                if units in ('s', 'sec'): units = 'seconds'
                                 define_info['units'] = units
 
                         if 'comment' not in define_info or define_info['comment'] == '':
@@ -428,12 +456,23 @@ def extract():
     return extract_files({ 'Configuration.h':'basic', 'Configuration_adv.h':'advanced' })
 
 def dump_json(schema:dict, jpath:Path):
-    with jpath.open('w') as jfile:
+    with jpath.open('w', encoding='utf-8') as jfile:
         json.dump(schema, jfile, ensure_ascii=False, indent=2)
 
 def dump_yaml(schema:dict, ypath:Path):
     import yaml
-    with ypath.open('w') as yfile:
+
+    # Custom representer for all multi-line strings
+    def str_literal_representer(dumper, data):
+        if '\n' in data:  # Check for multi-line strings
+            # Add a newline to trigger '|+'
+            if not data.endswith('\n'): data += '\n'
+            return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+    yaml.add_representer(str, str_literal_representer)
+
+    with ypath.open('w', encoding='utf-8') as yfile:
         yaml.dump(schema, yfile, default_flow_style=False, width=120, indent=2)
 
 def main():
@@ -454,10 +493,10 @@ def main():
         def inargs(c): return len(set(args) & set(c)) > 0
 
         # Help / Unknown option
-        unk = not inargs(['some','json','jsons','group','yml','yaml'])
+        unk = not inargs(['some','json','jsons','group','yml','yaml', '-h', '--help'])
         if (unk): print(f"Unknown option: '{args[0]}'")
         if inargs(['-h', '--help']) or unk:
-            print("Usage: schema.py [some|json|jsons|group|yml|yaml]...")
+            print("Usage: schema.py [-h] [some|json|jsons|group|yml|yaml]")
             print("       some  = json + yml")
             print("       jsons = json + group")
             return
